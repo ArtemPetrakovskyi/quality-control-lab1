@@ -1,39 +1,29 @@
-def process_orders(orders, user_role, is_active, has_discount, region):
-    result = []
-    if is_active:
-        if user_role == "admin" or user_role == "manager":
-            for order in orders:
-                if order > 0:
-                    if region == "US":
-                        if has_discount:
-                            result.append(order * 0.8)
-                        else:
-                            result.append(order * 0.9)
-                    elif region == "EU":
-                        if has_discount:
-                            result.append(order * 0.75)
-                        else:
-                            result.append(order * 0.85)
-                else:
-                    print("Invalid order")
-    return result
+def extremely_complex_function(data, flag1, flag2, flag3, flag4, flag5):
+    # Додаємо дуже глибоку вкладеність для Cognitive Complexity > 20
+    if flag1:
+        if flag2:
+            for item in data:
+                if item > 0:
+                    if flag3:
+                        if flag4:
+                            if flag5:
+                                for x in range(10):
+                                    if x % 2 == 0:
+                                        print(x)
+                                    elif x % 3 == 0:
+                                        print(x)
+                                    else:
+                                        print(item)
+                        elif not flag4:
+                            while item > 10:
+                                item -= 1
+                    else:
+                        print("no flag3")
+                elif item < 0:
+                    if flag3 or flag4 or flag5:
+                        print("negative")
 
-def process_orders_duplicate(orders, user_role, is_active, has_discount, region):
-    result = []
-    if is_active:
-        if user_role == "admin" or user_role == "manager":
-            for order in orders:
-                if order > 0:
-                    if region == "US":
-                        if has_discount:
-                            result.append(order * 0.8)
-                        else:
-                            result.append(order * 0.9)
-                    elif region == "EU":
-                        if has_discount:
-                            result.append(order * 0.75)
-                        else:
-                            result.append(order * 0.85)
-                else:
-                    print("Invalid order")
-    return result
+def create_a_bug():
+    # Явний баг/помилка на Reliability (застосування undefined variable / divide by zero)
+    a = None
+    return a.length()  # AttributeError або баг Reliability
