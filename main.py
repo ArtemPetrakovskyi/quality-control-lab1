@@ -1,13 +1,39 @@
-def calculate_discount(price, customer_type):
-    if price <= 0:
-        return 0
+def process_orders(orders, user_role, is_active, has_discount, region):
+    result = []
+    if is_active:
+        if user_role == "admin" or user_role == "manager":
+            for order in orders:
+                if order > 0:
+                    if region == "US":
+                        if has_discount:
+                            result.append(order * 0.8)
+                        else:
+                            result.append(order * 0.9)
+                    elif region == "EU":
+                        if has_discount:
+                            result.append(order * 0.75)
+                        else:
+                            result.append(order * 0.85)
+                else:
+                    print("Invalid order")
+    return result
 
-    if customer_type == "VIP":
-        return price * 0.2
-    elif customer_type == "Regular":
-        return price * 0.05
-    else:
-        return 0
-
-
-print(calculate_discount(100, "VIP"))
+def process_orders_duplicate(orders, user_role, is_active, has_discount, region):
+    result = []
+    if is_active:
+        if user_role == "admin" or user_role == "manager":
+            for order in orders:
+                if order > 0:
+                    if region == "US":
+                        if has_discount:
+                            result.append(order * 0.8)
+                        else:
+                            result.append(order * 0.9)
+                    elif region == "EU":
+                        if has_discount:
+                            result.append(order * 0.75)
+                        else:
+                            result.append(order * 0.85)
+                else:
+                    print("Invalid order")
+    return result
