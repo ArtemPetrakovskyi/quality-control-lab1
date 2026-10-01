@@ -1,16 +1,33 @@
 import pytest
-from unittest.mock import AsyncMock, patch
-from main import get_data_protected
+from main import process_user_order_complex
 
-@pytest.mark.asyncio
-async def test_resilience_fallback_and_retry():
-    mock_fetch = AsyncMock(side_effect=Exception("External Service Timeout"))
 
-    with patch("main.fetch_external_data_with_retry", mock_fetch):
-        result = await get_data_protected()
+def test_process_order_success_vip():
+    # Основний успішний сценарій для VIP
+    user = {"is_active": True, "is_vip": True}
+    cart = {"items": ["item1"], "total": 600.0}
+    result = process_user_order_complex(user, cart, promo_code="SALE2026")
 
-        assert result["status"] == "degraded"
-        assert result["is_fallback"] is True
-        assert result["data"] == "Cached Default Data (Fallback)"
+    assert result["status"] == "success"
+    assert result["discount"] == 0.30  # 0.25 VIP + 0.05 Promo
+    assert result["final_price"] == 420.0
 
-        assert mock_fetch.call_count == 1
+
+def test_process_order_user_inactive():
+    # неактивний користувач
+    user = {"is_active": False, "is_vip": False}
+    cart = {"items": ["item1"], "total": 100.0}
+    result = process_user_order_complex(user, cart)
+
+    assert result["status"] == "error"
+    assert result["message"] == "User is inactive"
+
+
+def test_process_order_empty_cart():
+    # порожній кошик
+    user = {"is_active": True, "is_vip": False}
+    cart = {"items": [], "total": 0.0}
+    result = process_user_order_complex(user, cart)
+
+    assert result["status"] == "error"
+    assert result["message"] == "Cart is empty"
