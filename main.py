@@ -13,47 +13,40 @@ app = FastAPI()
 
 SIMULATE_FAULT = False
 
+def _calculate_discount(user: Dict[str, Any], total: float, promo_code: Optional[str]) -> float:
+
+    if user.get("is_vip"):
+        discount = 0.25 if total > 500 else 0.15
+    else:
+        discount = 0.10 if total > 1000 else 0.05
+
+    if promo_code == "SALE2026":
+        discount += 0.05
+    elif promo_code == "SUPERBONUS" and user.get("is_vip"):
+        discount += 0.10
+
+    return discount
+
+
 def process_user_order_complex(user: Optional[Dict[str, Any]], cart: Optional[Dict[str, Any]],
                                promo_code: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Функція з високою складністю (багато вкладених умов) для Завдання 1.
-    """
-    if user is not None:
-        if user.get("is_active"):
-            if cart is not None and len(cart.get("items", [])) > 0:
-                total = cart.get("total", 0.0)
-                if total > 0:
-                    discount = 0.0
-                    if user.get("is_vip"):
-                        if total > 500:
-                            discount = 0.25
-                        else:
-                            discount = 0.15
-                    else:
-                        if total > 1000:
-                            discount = 0.10
-                        else:
-                            discount = 0.05
 
-                    if promo_code is not None:
-                        if promo_code == "SALE2026":
-                            discount += 0.05
-                        elif promo_code == "SUPERBONUS":
-                            if user.get("is_vip"):
-                                discount += 0.10
-
-                    final_price = total * (1.0 - discount)
-                    return {"status": "success", "final_price": final_price, "discount": discount}
-                else:
-                    return {"status": "error", "message": "Cart total is zero"}
-            else:
-                return {"status": "error", "message": "Cart is empty"}
-        else:
-            return {"status": "error", "message": "User is inactive"}
-    else:
+    if not user:
         return {"status": "error", "message": "User not found"}
+    if not user.get("is_active"):
+        return {"status": "error", "message": "User is inactive"}
+    if not cart or not cart.get("items"):
+        return {"status": "error", "message": "Cart is empty"}
 
-# ЕНДПОІНТИ З ЛАБОРАТОРНОЇ №1 / №2
+    total = cart.get("total", 0.0)
+    if total <= 0:
+        return {"status": "error", "message": "Cart total is zero"}
+
+    discount = _calculate_discount(user, total, promo_code)
+    final_price = total * (1.0 - discount)
+
+    return {"status": "success", "final_price": final_price, "discount": discount}
+
 @app.get("/api/v1/users/{user_id}")
 async def get_user_profile(user_id: int):
     delay = random.uniform(0.02, 0.10)
