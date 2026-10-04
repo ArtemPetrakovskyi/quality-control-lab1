@@ -1,114 +1,162 @@
-import asyncio
-import logging
-import random
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Query
-import httpx
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from datetime import datetime
+import database as db
+from logger_config import privacy_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ResilienceLogger")
-
-app = FastAPI()
-
-SIMULATE_FAULT = False
-
-def _calculate_discount(user: Dict[str, Any], total: float, promo_code: Optional[str]) -> float:
-
-    if user.get("is_vip"):
-        discount = 0.25 if total > 500 else 0.15
-    else:
-        discount = 0.10 if total > 1000 else 0.05
-
-    if promo_code == "SALE2026":
-        discount += 0.05
-    elif promo_code == "SUPERBONUS" and user.get("is_vip"):
-        discount += 0.10
-
-    return discount
+db.init_db()
 
 
-def process_user_order_complex(user: Optional[Dict[str, Any]], cart: Optional[Dict[str, Any]],
-                               promo_code: Optional[str] = None) -> Dict[str, Any]:
+def create_initial_data():
+    session = db.SessionLocal()
+    try:
+        existing_user = session.query(db.User).filter_by(id=1).first()
+        if not existing_user:
+            test_user = db.User(
+                id=1,
+                name="Ivan Testov",
+                email="ivan.test@example.com",
+                phone="+380991112233",
+                password_hash="secret_hashed_password_123"
+            )
+            session.add(test_user)
+            session.commit()
 
+            test_consent = db.Consent(
+                user_id=1,
+                purpose="MARKETING",
+                is_granted=False,
+                policy_version="v1.0"
+            )
+            session.add(test_consent)
+            session.commit()
+    finally:
+        session.close()
+
+
+create_initial_data()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_initial_data()
+    yield
+
+
+app = FastAPI(title="GDPR Privacy Engineering Demo", lifespan=lifespan)
+
+
+def get_db():
+    session = db.SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@app.get("/")
+def read_root():
+    return {"status": "System running"}
+
+
+@app.get("/api/users/{user_id}/personal-data")
+def export_personal_data(
+        user_id: int,
+        request_actor_id: int = 1,
+        db_session: Session = Depends(get_db)
+):
+    if user_id != request_actor_id:
+        privacy_logger.info(f"Unauthorized access attempt by actor={request_actor_id} for user={user_id}")
+        raise HTTPException(status_code=403, detail="Access denied: Cannot access other user data")
+
+    user = db_session.query(db.User).filter_by(id=user_id).first()
     if not user:
-        return {"status": "error", "message": "User not found"}
-    if not user.get("is_active"):
-        return {"status": "error", "message": "User is inactive"}
-    if not cart or not cart.get("items"):
-        return {"status": "error", "message": "Cart is empty"}
+        raise HTTPException(status_code=404, detail="User not found")
 
-    total = cart.get("total", 0.0)
-    if total <= 0:
-        return {"status": "error", "message": "Cart total is zero"}
+    consents = db_session.query(db.Consent).filter_by(user_id=user_id).all()
+    consents_data = [
+        {
+            "purpose": c.purpose,
+            "is_granted": c.is_granted,
+            "policy_version": c.policy_version,
+            "updated_at": str(c.updated_at)
+        }
+        for c in consents
+    ]
 
-    discount = _calculate_discount(user, total, promo_code)
-    final_price = total * (1.0 - discount)
-
-    return {"status": "success", "final_price": final_price, "discount": discount}
-
-@app.get("/api/v1/users/{user_id}")
-async def get_user_profile(user_id: int):
-    delay = random.uniform(0.02, 0.10)
-    await asyncio.sleep(delay)
-
-    if random.random() < 0.01:
-        raise HTTPException(status_code=500, detail="Database connection timeout")
+    privacy_logger.info(f"Data export executed for user_id={user_id}")
 
     return {
-        "id": user_id,
-        "name": f"User_{user_id}",
-        "status": "active"
+        "metadata": {"export_version": "1.0", "subject_id": user.id},
+        "profile": {
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone
+        },
+        "consents": consents_data
     }
 
 
-@app.get("/external-api/data")
-async def external_service():
-    if SIMULATE_FAULT:
-        raise HTTPException(status_code=500, detail="External service is down!")
-    return {"status": "success", "data": "Important Data"}
+@app.post("/api/users/{user_id}/anonymize")
+def anonymize_user(
+        user_id: int,
+        request_actor_id: int = 1,
+        db_session: Session = Depends(get_db)
+):
+    if user_id != request_actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    user = db_session.query(db.User).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.name = "Anonymous User"
+    user.email = f"deleted_{user.id}@anon.local"
+    user.phone = "+000000000000"
+    user.password_hash = "[REDACTED]"
+
+    db_session.commit()
+    privacy_logger.info(f"User anonymized successfully for user_id={user_id}")
+
+    return {"status": "Success", "message": "User PII has been irreversibly anonymized"}
 
 
-@app.post("/toggle-fault")
-async def toggle_fault(enable: bool = Query(...)):
-    global SIMULATE_FAULT
-    SIMULATE_FAULT = enable
-    return {"fault_injection_active": SIMULATE_FAULT}
+@app.post("/api/consents/grant")
+def grant_consent(user_id: int, purpose: str, db_session: Session = Depends(get_db)):
+    consent = db_session.query(db.Consent).filter_by(user_id=user_id, purpose=purpose).first()
+    if not consent:
+        consent = db.Consent(user_id=user_id, purpose=purpose)
+        db_session.add(consent)
+
+    consent.is_granted = True
+    consent.updated_at = datetime.utcnow()
+    db_session.commit()
+    return {"status": "Granted", "purpose": purpose}
 
 
-@app.get("/api/v1/data-unprotected")
-async def get_data_unprotected():
-    async with httpx.AsyncClient() as client:
-        response = await client.get("http://localhost:8000/external-api/data")
-        if response.status_code != 200:
-            raise HTTPException(status_code=500, detail="Unprotected call failed")
-        return response.json()
+@app.post("/api/consents/revoke")
+def revoke_consent(user_id: int, purpose: str, db_session: Session = Depends(get_db)):
+    consent = db_session.query(db.Consent).filter_by(user_id=user_id, purpose=purpose).first()
+    if consent:
+        consent.is_granted = False
+        consent.updated_at = datetime.utcnow()
+        db_session.commit()
+    return {"status": "Revoked", "purpose": purpose}
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_fixed(0.5),
-    retry=retry_if_exception_type(Exception),
-    reraise=True
-)
-async def fetch_external_data_with_retry():
-    async with httpx.AsyncClient() as client:
-        logger.info("Attempting external service call...")
-        response = await client.get("http://localhost:8000/external-api/data", timeout=2.0)
-        if response.status_code != 200:
-            raise Exception("External API Error")
-        return response.json()
+def check_consent_policy(user_id: int, purpose: str, db_session: Session) -> bool:
+    consent = db_session.query(db.Consent).filter_by(user_id=user_id, purpose=purpose).first()
+    return consent.is_granted if consent else False
 
 
-@app.get("/api/v1/data-protected")
-async def get_data_protected():
-    try:
-        data = await fetch_external_data_with_retry()
-        return data
-    except Exception as e:
-        logger.warning(f"External service unavailable: {e}. Applied Fallback!")
-        return {
-            "status": "degraded",
-            "data": "Cached Default Data (Fallback)",
-            "is_fallback": True
-        }
+@app.post("/api/marketing/send")
+def send_marketing_email(user_id: int, db_session: Session = Depends(get_db)):
+    has_permission = check_consent_policy(user_id, "MARKETING", db_session)
+
+    if not has_permission:
+        privacy_logger.info(f"Action DENIED for user_id={user_id} due to missing consent")
+        raise HTTPException(status_code=403, detail="Policy Gate: Consent for MARKETING is missing or revoked")
+
+    privacy_logger.info(f"Marketing email sent to user_id={user_id}")
+    return {"status": "Success", "message": "Marketing email sent!"}

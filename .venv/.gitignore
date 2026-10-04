@@ -1,0 +1,4 @@
+.env
+config_test.py
+__pycache__/
+.venv/
